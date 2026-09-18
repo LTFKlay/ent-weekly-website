@@ -1,8 +1,114 @@
 ---
+import fs from 'node:fs';
+import path from 'node:path';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { articles } from '../../data/site';
-export function getStaticPaths() { return []; }
-const references = articles;
-const cite = (pmid: string) => `<a class="cite" href="/article/${pmid}/">[${pmid}]</a>`;
+
+const weeklyDir = process.env.WEEKLY_SNAPSHOT_DIR && fs.existsSync(process.env.WEEKLY_SNAPSHOT_DIR)
+  ? process.env.WEEKLY_SNAPSHOT_DIR
+  : path.resolve(process.cwd(), '../data/weekly');
+
+export function getStaticPaths() {
+  const directory = process.env.WEEKLY_SNAPSHOT_DIR && fs.existsSync(process.env.WEEKLY_SNAPSHOT_DIR)
+    ? process.env.WEEKLY_SNAPSHOT_DIR
+    : path.resolve(process.cwd(), '../data/weekly');
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory)
+    .filter((file) => /^weekly-\d{4}-\d{2}-\d{2}\.json$/.test(file))
+    .map((file) => {
+      const payload = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8'));
+      return { params: { week: payload.summary.week_start }, props: { report: payload } };
+    });
+}
+
+const { report } = Astro.props;
+const specialtyLabels: Record<string, string> = {
+  rhinology: '鼻科', otology: '耳科', laryngology: '咽喉科', nasopharyngeal_carcinoma: '鼻咽癌',
+};
+const categoryLabels: Record<string, string> = {
+  clinical: '临床研究', ai_ml: 'AI/ML', basic: '基础研究', review_meta: '综述 Meta', guideline_consensus: '指南共识',
+};
+const specialtyOrder = ['rhinology', 'otology', 'laryngology', 'nasopharyngeal_carcinoma'];
+const categoryOrder = ['clinical', 'ai_ml', 'basic', 'review_meta', 'guideline_consensus'];
+const citationNumber = new Map(report.articles.map((article: any, index: number) => [String(article.pmid), index + 1]));
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+const citation = (pmid: string) => {
+  const number = citationNumber.get(pmid);
+  return number ? `<sup class="inline-citation"><a href="/article/${pmid}/" aria-label="查看文献 [${number}]">[${number}]</a></sup>` : pmid;
+};
+const removeBoilerplateLead = (value: string) => value.replace(/^本周[^。]{0,48}证据涵盖[^。]*。\s*/, '');
+const renderParagraph = (value: string) => escapeHtml(removeBoilerplateLead(value))
+  .replace(/(?:[（(]\s*)?\[\[PMID:(\d{8})\]\](?:\s*[）)])?|(?:[（(]\s*)?(?:PMID\s*|PMID：)(\d{8})(?:\s*[）)])?|(?:[（(]\s*)?(?<!\d)(\d{8})(?!\d)(?:\s*[）)])?/gi, (_, tagged, labeled, plain) => citation(tagged || labeled || plain))
+  .replace(/\n/g, '<br />');
+const groupedSections = specialtyOrder.map((specialty) => ({
+  specialty,
+  categories: categoryOrder.map((category) => ({
+    category,
+    sections: report.summary.sections.filter((section: any) => section.specialty === specialty && section.display_category === category),
+  })).filter((category) => category.sections.length),
+})).filter((group) => group.categories.length);
+const reportTitle = `${report.summary.week_start} – ${report.summary.week_end} 耳鼻喉文献周报`;
 ---
-<BaseLayout title="ENT 文献周报"><div class="page"><header class="report-head"><span class="eyebrow">Weekly review · 演示版</span><h1>ENT 文献周报</h1><p>2026.09.07 – 09.13</p><div class="stats"><span>本周纳入 <b>6</b> 篇</span><span>鼻科 <b>2</b></span><span>耳科 <b>1</b></span><span>咽喉科 <b>2</b></span><span>鼻咽癌 <b>1</b></span></div></header><div class="audit"><b>演示说明。</b>本页展示 DeepSeek 长篇自动综述的版式。生产模式下，内容只从通过 JCR/CAS 门禁的当期 PubMed 摘要生成，段落引文必须指向本期 PMID。</div><section class="report-section"><h2>一、检索与质量审计</h2><p>报告周：2026.09.07 – 09.13（Asia/Shanghai）。正式报告在此列出 EDAT 主列表、PDAT 回补、检索版本、候选数、各专科计数、质量门禁和排除统计。</p></section><section class="report-section"><h2>二、鼻科</h2><h3>临床研究与综述 Meta</h3><p set:html={`本期演示内容聚焦慢性鼻窦炎的长期管理与嗅觉上皮再生。真实综述会逐一说明研究设计、对象、结局和局限性；观察性信号不会作为临床推荐。${cite('DEMO-1001')} ${cite('DEMO-1005')}`}></p></section><section class="report-section"><h2>三、耳科</h2><h3>临床研究</h3><p set:html={`人工耳蜗植入术后言语识别结局需要结合基线情况与随访时间解读。若摘要未报告样本量或效应量，生产综述会明确写作“摘要未报告”。${cite('DEMO-1002')}`}></p></section><section class="report-section"><h2>四、咽喉科</h2><h3>基础研究与指南共识</h3><p set:html={`喉癌免疫微环境和早期口咽癌功能结局分属不同证据轨道，不能相互替代，也不能单独改变临床路径。${cite('DEMO-1003')} ${cite('DEMO-1006')}`}></p></section><section class="report-section"><h2>五、鼻咽癌</h2><h3>AI/ML</h3><p set:html={`循环 EBV DNA 风险分层的临床价值需结合验证队列、检测时点和阈值判断；站内文字只复述摘要支持的结论。${cite('DEMO-1004')}`}></p></section><section class="report-section"><h2>六、证据边界</h2><p>DeepSeek 只能归纳已纳入摘要，不能补充外部知识或形成诊疗建议。英文 PubMed 摘要优先；本周综述不构成临床指南。</p></section><section class="report-section"><h2>参考文献</h2>{references.map((article) => <div class="reference"><b>{article.pmid}</b> · {article.authors.join('；')} · {article.titleEn} · {article.journal} · <a href={`/article/${article.pmid}/`}>查看文献卡片</a></div>)}</section></div></BaseLayout>
+
+<BaseLayout title={reportTitle}>
+  <div class="page weekly-report">
+    <a class="back-link" href="/weekly/">← 返回历史周报</a>
+    <header class="weekly-head">
+      <span class="eyebrow">ENT WEEKLY REVIEW</span>
+      <h1>{reportTitle}</h1>
+      <p class="muted">本周收录 {report.audit.public_records} 篇</p>
+    </header>
+
+    <div class="report-layout">
+      <aside class="weekly-toc" aria-label="周报专科目录">
+        <span>本期目录</span>
+        {groupedSections.map((group) => <a href={`#section-${group.specialty}`}>{specialtyLabels[group.specialty]}</a>)}
+        <a href="#references">参考文献</a>
+      </aside>
+
+      <div class="report-body">
+        {groupedSections.map((group) => <section id={`section-${group.specialty}`} class:list={['specialty-section', `specialty-${group.specialty}`]}>
+          <header class="specialty-heading">{specialtyLabels[group.specialty]}</header>
+          {group.categories.map((category) => <article class="evidence-block">
+            <h2>{categoryLabels[category.category] || category.category}</h2>
+            {category.sections.map((section: any) => <p set:html={renderParagraph(section.markdown)}></p>)}
+          </article>)}
+        </section>)}
+
+        <section id="references" class="references report-section">
+          <h2>参考文献</h2>
+          <p class="muted">点击编号可进入站内文献卡片。</p>
+          {report.articles.map((article: any, index: number) => <div class="reference"><a class="reference-number" href={`/article/${article.pmid}/`}>[{index + 1}]</a><span>{article.authors?.[0] || '作者未报告'}．{article.classification?.title_zh || article.title_en}．<em>{article.journal}</em>．PMID {article.pmid}</span></div>)}
+        </section>
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .weekly-report { max-width: 960px; }
+  .weekly-head { padding: 8px 0 26px; border-bottom: 2px solid var(--accent); }
+  .weekly-head h1 { max-width: 760px; margin: 8px 0; font-size: clamp(2rem, 4vw, 2.85rem); }
+  .report-layout { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 28px; align-items: start; }
+  .weekly-toc { position: sticky; top: 108px; display: grid; gap: 5px; padding-top: 40px; }
+  .weekly-toc > span { margin-bottom: 5px; color: var(--muted); font-size: .74rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .weekly-toc a { padding: 7px 10px; border-left: 2px solid var(--line); color: var(--muted); font-size: .88rem; font-weight: 700; text-decoration: none; transition: border-color .18s ease, color .18s ease, background .18s ease; }
+  .weekly-toc a:hover { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent-strong); }
+  .report-body { min-width: 0; }
+  .specialty-section { margin: 40px 0; }
+  .specialty-heading { margin-bottom: 18px; color: var(--accent-strong); font-size: 1.45rem; font-weight: 800; letter-spacing: -.03em; }
+  .specialty-otology .specialty-heading { color: #236b91; }
+  .specialty-laryngology .specialty-heading { color: #785f93; }
+  .specialty-nasopharyngeal_carcinoma .specialty-heading { color: #a35a60; }
+  .evidence-block { padding: 20px 0 19px; border-bottom: 1px solid var(--line); }
+  .evidence-block h2 { margin-bottom: 9px; color: var(--ink); font-size: 1.02rem; }
+  .evidence-block > p { margin: 0 0 14px; color: color-mix(in srgb, var(--ink) 89%, var(--muted)); font-size: .96rem; line-height: 2; }
+  .evidence-block > p:last-child { margin-bottom: 0; }
+  :global(.inline-citation) { margin-left: 2px; vertical-align: super; line-height: 0; }
+  :global(.inline-citation a), .reference-number { color: var(--blue); font-size: .76em; font-weight: 800; text-decoration: none; }
+  :global(.inline-citation a):hover, .reference-number:hover { text-decoration: underline; }
+  .references { margin-top: 50px; }.references > h2 { padding-bottom: 10px; border-bottom: 2px solid var(--accent); }
+  .reference { display: grid; grid-template-columns: 45px minmax(0, 1fr); gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .86rem; line-height: 1.65; }
+  .reference-number { width: fit-content; margin: 0; font-size: .92rem; }.reference em { color: var(--ink); font-style: normal; }
+  @media (max-width: 760px) { .weekly-head h1 { font-size: 1.8rem; }.report-layout { display: block; }.weekly-toc { position: static; display: flex; flex-wrap: wrap; gap: 7px; padding-top: 24px; }.weekly-toc > span { width: 100%; }.weekly-toc a { border: 1px solid var(--line); border-radius: 999px; }.evidence-block > p { font-size: .92rem; line-height: 1.9; } }
+</style>

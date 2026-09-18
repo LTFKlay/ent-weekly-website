@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     llm_max_concurrent: int = 3
     db_path: Path = Path("/data/ent_weekly.db")
     snapshot_dir: Path = Path("/data/snapshots")
+    weekly_snapshot_dir: Path = Path("/data/weekly")
     journal_quality_path: Path = Path("/data/journal-quality.json")
     regen_token: str = ""
 

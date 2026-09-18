@@ -7,7 +7,7 @@ web/dist/
 data/*.db
 data/backups/
 data/snapshots/
+data/weekly/
 data/journal-quality.json
 !data/.gitkeep
 *.log
-

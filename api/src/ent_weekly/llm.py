@@ -26,7 +26,11 @@ class DeepSeekClient:
                 response.raise_for_status()
             content = response.json()["choices"][0]["message"].get("content") or ""
             if content.strip():
-                return json.loads(content)
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    if attempt == 2:
+                        raise RuntimeError("DeepSeek returned malformed structured JSON after three attempts.")
             if attempt < 2:
                 await asyncio.sleep(2 ** attempt)
         raise RuntimeError("DeepSeek returned an empty structured response after three attempts.")
@@ -49,12 +53,53 @@ class DeepSeekClient:
         value = await self._json_completion(payload)
         if "classification_reason" not in value and "reason" in value:
             value["classification_reason"] = value["reason"]
-        if value.get("evidence_track") in {"ai_ml", "review", "guideline", "guideline_consensus"}:
+        specialty_aliases = {
+            "nose": "rhinology",
+            "nasal": "rhinology",
+            "ear": "otology",
+            "hearing": "otology",
+            "otolaryngology": "laryngology",
+            "laryngology": "laryngology",
+            "throat": "laryngology",
+            "npc": "nasopharyngeal_carcinoma",
+            "nasopharyngeal cancer": "nasopharyngeal_carcinoma",
+        }
+        specialty = str(value.get("primary_specialty", "")).strip().lower()
+        if specialty in specialty_aliases:
+            value["primary_specialty"] = specialty_aliases[specialty]
+        elif specialty not in {"rhinology", "otology", "laryngology", "nasopharyngeal_carcinoma"}:
+            matched_topics = [topic for topic in article.topic_matches if topic in {"rhinology", "otology", "laryngology", "nasopharyngeal_carcinoma"}]
+            value["primary_specialty"] = matched_topics[0] if len(matched_topics) == 1 else "laryngology"
+        decision_aliases = {
+            "background/trend": "background_trend",
+            "background": "background_trend",
+            "include": "include",
+            "exclude": "exclude",
+        }
+        value["screening_decision"] = decision_aliases.get(str(value.get("screening_decision", "")).strip().lower(), "exclude")
+        evidence_track = str(value.get("evidence_track", "")).strip().lower()
+        if evidence_track in {"ai_ml", "review", "guideline", "guideline_consensus", "clinical research", "clinical"}:
             value["evidence_track"] = "clinical"
-        if value.get("evidence_track") in {"basic", "basic_translational_research"}:
+        if evidence_track in {"basic", "basic_translational_research", "basic/translational", "translational"}:
             value["evidence_track"] = "basic_translational"
-        category_aliases = {"basic_translational": "basic", "review": "review_meta", "guideline": "guideline_consensus"}
-        value["display_category"] = category_aliases.get(value.get("display_category"), value.get("display_category"))
+        if value.get("evidence_track") not in {"clinical", "basic_translational"}:
+            value["evidence_track"] = "clinical"
+        category_aliases = {
+            "basic_translational": "basic",
+            "basic/translational": "basic",
+            "review": "review_meta",
+            "meta-analysis": "review_meta",
+            "meta_analysis": "review_meta",
+            "guideline": "guideline_consensus",
+            "consensus": "guideline_consensus",
+            "clinical research": "clinical",
+            "clinical": "clinical",
+        }
+        category = str(value.get("display_category", "")).strip().lower()
+        value["display_category"] = category_aliases.get(category, category)
+        if value["display_category"] not in {"clinical", "ai_ml", "basic", "review_meta", "guideline_consensus"}:
+            value["display_category"] = "basic" if value["evidence_track"] == "basic_translational" else "clinical"
+        value.setdefault("classification_reason", "Exclude: structured classifier did not provide a reason.")
         value.update({"provider": "DeepSeek", "model": self.settings.deepseek_model, "prompt_version": CLASSIFICATION_PROMPT_VERSION, "generated_at": datetime.now(timezone.utc)})
         return Classification.model_validate(value)
 
@@ -71,3 +116,31 @@ class DeepSeekClient:
         result = await self._json_completion(request)
         result.update({"provider": "DeepSeek", "model": self.settings.deepseek_model, "prompt_version": WEEKLY_PROMPT_VERSION, "generated_at": datetime.now(timezone.utc)})
         return WeeklySummary.model_validate(result)
+
+    async def summarize_section(self, payload: dict) -> dict:
+        """Summarize a bounded specialty/category slice to keep long weeks within context limits."""
+        if not self.settings.deepseek_api_key or not self.settings.deepseek_model:
+            raise RuntimeError("DeepSeek credentials/model are not configured.")
+        prompt = (
+            "Return JSON only with exactly two keys: markdown and pmids. "
+            "Write a polished Chinese weekly-report paragraph based exclusively on the supplied PubMed records. "
+            "Do not make recommendations or infer unreported data. State '摘要未报告' where needed. "
+            "Use a continuous editorial paragraph rather than bullets. Keep markdown to 180–260 Chinese words. "
+            "When citing a record in the paragraph, use exactly the token [[PMID:12345678]] immediately after the relevant statement. "
+            "The pmids array must only contain supplied PMIDs that are discussed in markdown. "
+            "Use each supplied record at most once and retain the original PMID identifiers.\n"
+            + json.dumps(payload, ensure_ascii=False)
+        )
+        request = {
+            "model": self.settings.deepseek_model,
+            "temperature": 0.15,
+            "thinking": {"type": "disabled"},
+            "max_tokens": 1400,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        result = await self._json_completion(request)
+        if not isinstance(result.get("markdown"), str):
+            raise RuntimeError("DeepSeek weekly section did not return markdown.")
+        result["pmids"] = [str(pmid) for pmid in result.get("pmids", [])]
+        return result

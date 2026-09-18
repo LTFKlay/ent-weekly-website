@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import ArticleRecord, Classification, JournalQuality, PubMedArticle
+from .models import ArticleRecord, Classification, JournalQuality, PubMedArticle, WeeklySummary
 
 
 SCHEMA = """
@@ -167,6 +167,64 @@ class Database:
     def get_article(self, pmid: str) -> dict | None:
         records = [row for row in self.list_articles(500) if row["pmid"] == pmid]
         return records[0] if records else None
+
+    def list_articles_for_edat_week(self, week_start: str, week_end: str) -> list[dict]:
+        """Return the public records whose EDAT source date falls within a natural week."""
+        start_key = f"{week_start}..{week_start}"
+        end_key = f"{week_end}..{week_end}"
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT a.*, q.jcr_quartile, q.five_year_jif, s.decision,
+                          s.primary_specialty, s.evidence_track, s.display_category, l.output_json
+                   FROM articles a
+                   JOIN article_sources src ON src.pmid = a.pmid
+                   JOIN journal_quality q ON q.pmid = a.pmid
+                   JOIN screening s ON s.pmid = a.pmid
+                   LEFT JOIN llm_records l ON l.pmid = a.pmid
+                   WHERE src.date_type = 'edat' AND src.source_date >= ? AND src.source_date <= ?
+                     AND s.decision IN ('include', 'background_trend')
+                   ORDER BY a.publication_date DESC, a.pmid DESC""",
+                (start_key, end_key),
+            ).fetchall()
+            records = [self._serialize(row) for row in rows]
+            if not records:
+                return records
+            pmids = [record["pmid"] for record in records]
+            placeholders = ",".join("?" for _ in pmids)
+            source_rows = connection.execute(
+                f"SELECT pmid, date_type, source_date FROM article_sources WHERE pmid IN ({placeholders})",
+                pmids,
+            ).fetchall()
+        sources_by_pmid: dict[str, dict[str, str]] = {pmid: {} for pmid in pmids}
+        for source in source_rows:
+            sources_by_pmid[source["pmid"]][source["date_type"]] = source["source_date"]
+        for record in records:
+            record["source_dates"] = sources_by_pmid[record["pmid"]]
+        return records
+
+    def save_weekly_report(self, summary: WeeklySummary, audit: dict, pmids: list[str]) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO weekly_reports(week_start, week_end, revision, summary_json, audit_json, status, generated_at)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(week_start) DO UPDATE SET week_end=excluded.week_end,
+                     revision=weekly_reports.revision + 1, summary_json=excluded.summary_json,
+                     audit_json=excluded.audit_json, status=excluded.status, generated_at=excluded.generated_at""",
+                (
+                    summary.week_start,
+                    summary.week_end,
+                    1,
+                    summary.model_dump_json(),
+                    json.dumps(audit, ensure_ascii=False),
+                    "success",
+                    summary.generated_at.isoformat(),
+                ),
+            )
+            connection.execute("DELETE FROM weekly_report_articles WHERE week_start=?", (summary.week_start,))
+            connection.executemany(
+                "INSERT OR IGNORE INTO weekly_report_articles(week_start, pmid) VALUES(?, ?)",
+                [(summary.week_start, pmid) for pmid in pmids],
+            )
 
     def upsert_candidate(self, article: PubMedArticle) -> None:
         with self.connect() as connection:

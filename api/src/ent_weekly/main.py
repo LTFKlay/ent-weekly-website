@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .database import Database
 from .settings import settings
-from .pipeline import DailyPipeline
+from .pipeline import DailyPipeline, WeeklyPipeline
 
 app = FastAPI(title="ENT Weekly API", version="0.1.0")
 database = Database(settings.db_path)
@@ -13,6 +13,10 @@ database = Database(settings.db_path)
 
 class DailyRunRequest(BaseModel):
     target_edat: date
+
+
+class WeeklyRunRequest(BaseModel):
+    week_start: date
 
 
 @app.on_event("startup")
@@ -50,5 +54,5 @@ async def run_daily(request: DailyRunRequest) -> dict:
 
 
 @app.post("/internal/run-weekly", dependencies=[Depends(require_internal)])
-def run_weekly() -> dict:
-    return {"status": "queued", "message": "Weekly pipeline module will run this job."}
+async def run_weekly(request: WeeklyRunRequest) -> dict:
+    return await WeeklyPipeline(settings, database).run(request.week_start)

@@ -1,4 +1,32 @@
 ---
+import fs from 'node:fs';
+import path from 'node:path';
 import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const weeklyDir = process.env.WEEKLY_SNAPSHOT_DIR && fs.existsSync(process.env.WEEKLY_SNAPSHOT_DIR)
+  ? process.env.WEEKLY_SNAPSHOT_DIR
+  : path.resolve(process.cwd(), '../data/weekly');
+
+const reports = fs.existsSync(weeklyDir)
+  ? fs.readdirSync(weeklyDir)
+    .filter((file) => /^weekly-\d{4}-\d{2}-\d{2}\.json$/.test(file))
+    .map((file) => JSON.parse(fs.readFileSync(path.join(weeklyDir, file), 'utf8')))
+    .sort((left, right) => right.summary.week_start.localeCompare(left.summary.week_start))
+  : [];
 ---
-<BaseLayout title="历史周报"><div class="page"><header class="page-head"><span class="eyebrow">Weekly archive</span><h1>ENT 文献周报</h1><p class="muted">每期由 DeepSeek 基于当期已纳入 PubMed 摘要生成，并保留 PMID 编号引用。</p></header><section class="card" style="margin-top:24px"><h2>首期周报待生成</h2><p class="muted">真实日更已开始积累。完整自然周结束后，系统会合并 EDAT 主清单与 PDAT 回补，生成按“专科 × 研究类型”组织的中文综述。</p></section></div></BaseLayout>
+
+<BaseLayout title="历史周报">
+  <div class="page">
+    <header class="page-head">
+      <span class="eyebrow">Weekly archive</span>
+      <h1>ENT 文献周报</h1>
+    </header>
+
+    {reports.length ? <section class="weekly-list">
+      {reports.map((report) => <a class="period" href={`/weekly/${report.summary.week_start}/`}>
+        <span><strong>{report.summary.week_start} – {report.summary.week_end}</strong><span>{report.audit.public_records} 篇文献</span></span>
+        <em>阅读周报 →</em>
+      </a>)}
+    </section> : <section class="card"><h2>暂无已生成周报</h2><p class="muted">完整自然周的日追踪完成后，系统会在此发布中文综述。</p></section>}
+  </div>
+</BaseLayout>

@@ -8,6 +8,7 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       DB_PATH: /data/ent_weekly.db
       SNAPSHOT_DIR: /data/snapshots
+      WEEKLY_SNAPSHOT_DIR: /data/weekly
       JOURNAL_QUALITY_PATH: /data/journal-quality.json
     volumes:
       - ent_data:/data
@@ -30,6 +31,7 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       DB_PATH: /data/ent_weekly.db
       SNAPSHOT_DIR: /data/snapshots
+      WEEKLY_SNAPSHOT_DIR: /data/weekly
       JOURNAL_QUALITY_PATH: /data/journal-quality.json
     volumes:
       - ent_data:/data
