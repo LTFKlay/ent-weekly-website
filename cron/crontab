@@ -1,0 +1,5 @@
+# supercronic evaluates this schedule in the TZ injected by docker-compose.
+0 14 * * * /app/cron/jobs/daily.sh
+0 10 * * 1 /app/cron/jobs/backup.sh
+0 19 * * 1 /app/cron/jobs/weekly.sh
+

@@ -1,0 +1,76 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DB_PATH: /data/ent_weekly.db
+      SNAPSHOT_DIR: /data/snapshots
+      JOURNAL_QUALITY_PATH: /data/journal-quality.json
+    volumes:
+      - ent_data:/data
+      - web_dist:/app/web_dist
+      - ./data/journal-quality.json:/data/journal-quality.json:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  cron:
+    build:
+      context: .
+      dockerfile: cron/Dockerfile
+    env_file: .env
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DB_PATH: /data/ent_weekly.db
+      SNAPSHOT_DIR: /data/snapshots
+      JOURNAL_QUALITY_PATH: /data/journal-quality.json
+    volumes:
+      - ent_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "80"
+    volumes:
+      - type: volume
+        source: web_dist
+        target: /usr/share/nginx/html
+        read_only: true
+        volume:
+          nocopy: true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  ent_data:
+  web_dist:
+  caddy_data:
+  caddy_config:

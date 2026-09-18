@@ -1,0 +1,63 @@
+---
+import { specialties, categories } from '../data/site';
+
+interface Props {
+  section: 'dates' | 'filters';
+  entryDates: string[];
+  activeDate?: string;
+  activeSpecialty?: string;
+  activeCategory?: string;
+}
+
+const {
+  section,
+  entryDates,
+  activeDate = 'all',
+  activeSpecialty = 'all',
+  activeCategory = 'all',
+} = Astro.props;
+
+const specialtySlug: Record<string, string> = {
+  '全部': 'all',
+  '鼻科': 'rhinology',
+  '耳科': 'otology',
+  '咽喉科': 'laryngology',
+  '鼻咽癌': 'nasopharyngeal-carcinoma',
+};
+
+const categorySlug: Record<string, string> = {
+  '全部': 'all',
+  '临床研究': 'clinical',
+  'AI/ML': 'ai-ml',
+  '基础研究': 'basic',
+  '综述 Meta': 'review-meta',
+  '指南共识': 'guideline',
+};
+
+const browseUrl = (date: string, specialty: string, category: string) => {
+  if (date === 'all' && specialty === 'all' && category === 'all') return '/';
+  return `/browse/${date}/${specialty}/${category}/`;
+};
+---
+
+{section === 'dates' && <aside class="date-rail" aria-label="按入库日筛选文献">
+  <a class:list={["date-option", { active: activeDate === 'all' }]} href={browseUrl('all', activeSpecialty, activeCategory)}>全部日期</a>
+  {entryDates.map((date) => <a class:list={["date-option", { active: activeDate === date }]} href={browseUrl(date, activeSpecialty, activeCategory)}>{date}</a>)}
+</aside>}
+
+{section === 'filters' && <section class="filters compact-filters" aria-label="文献筛选">
+  <div class="filter-row">
+    <span class="filter-label">专科</span>
+    {specialties.map((item) => {
+      const slug = specialtySlug[item];
+      return <a class:list={["chip", { active: activeSpecialty === slug }]} href={browseUrl(activeDate, slug, activeCategory)}>{item}</a>;
+    })}
+  </div>
+  <div class="filter-row">
+    <span class="filter-label">类型</span>
+    {categories.map((item) => {
+      const slug = categorySlug[item];
+      return <a class:list={["chip", { active: activeCategory === slug }]} href={browseUrl(activeDate, activeSpecialty, slug)}>{item}</a>;
+    })}
+  </div>
+</section>}

@@ -1,0 +1,53 @@
+---
+import BaseLayout from '../../../../layouts/BaseLayout.astro';
+import ArticleCard from '../../../../components/ArticleCard.astro';
+import BrowserControls from '../../../../components/BrowserControls.astro';
+import { articles } from '../../../../data/site';
+
+const specialtyLabels: Record<string, string> = {
+  all: '全部', rhinology: '鼻科', otology: '耳科', laryngology: '咽喉科', 'nasopharyngeal-carcinoma': '鼻咽癌',
+};
+const categoryLabels: Record<string, string> = {
+  all: '全部', clinical: '临床研究', 'ai-ml': 'AI/ML', basic: '基础研究', 'review-meta': '综述 Meta', guideline: '指南共识',
+};
+
+export function getStaticPaths() {
+  const dates = ['all', ...[...new Set(articles.map((article) => article.entryDate).filter(Boolean))]];
+  const specialtySlugs = ['all', 'rhinology', 'otology', 'laryngology', 'nasopharyngeal-carcinoma'];
+  const categorySlugs = ['all', 'clinical', 'ai-ml', 'basic', 'review-meta', 'guideline'];
+  return dates.flatMap((date) => specialtySlugs.flatMap((specialty) =>
+    categorySlugs.map((category) => ({ params: { date, specialty, category } })),
+  ));
+}
+
+const date = Astro.params.date || 'all';
+const specialty = Astro.params.specialty || 'all';
+const category = Astro.params.category || 'all';
+const entryDates = [...new Set(articles.map((article) => article.entryDate).filter(Boolean))].sort().reverse() as string[];
+const specialtyLabel = specialtyLabels[specialty] || '全部';
+const categoryLabel = categoryLabels[category] || '全部';
+const selected = articles.filter((article) =>
+  (date === 'all' || article.entryDate === date)
+  && (specialty === 'all' || article.specialty === specialtyLabel)
+  && (category === 'all' || article.category === categoryLabel),
+);
+const datesToRender = date === 'all' ? entryDates : [date];
+---
+<BaseLayout title="文献筛选">
+  <div class="page">
+    <div class="library-layout">
+      <BrowserControls section="dates" entryDates={entryDates} activeDate={date} activeSpecialty={specialty} activeCategory={category} />
+      <div class="library-results">
+        <BrowserControls section="filters" entryDates={entryDates} activeDate={date} activeSpecialty={specialty} activeCategory={category} />
+        <div class="daily-groups">
+          {selected.length === 0 && <p class="muted">暂无符合筛选条件的文献。</p>}
+          {datesToRender.map((entryDate) => {
+            const group = selected.filter((article) => article.entryDate === entryDate);
+            if (group.length === 0) return null;
+            return <section class="group date-group"><h2 class="group-title">{entryDate} <small>· {group.length} 篇</small></h2>{group.map((article) => <ArticleCard article={article} />)}</section>;
+          })}
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

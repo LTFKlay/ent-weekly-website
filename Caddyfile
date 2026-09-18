@@ -1,0 +1,12 @@
+{
+  email {$CADDY_EMAIL}
+}
+
+www.{$SITE_DOMAIN} {
+  reverse_proxy web:80
+}
+
+{$SITE_DOMAIN} {
+  redir https://www.{$SITE_DOMAIN}{uri} 301
+}
+

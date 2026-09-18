@@ -1,0 +1,68 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { articles } from '../../data/site';
+
+export function getStaticPaths() {
+  return articles.map((article) => ({ params: { pmid: article.pmid }, props: { article } }));
+}
+
+const { article } = Astro.props;
+const firstAuthor = article.authors[0] || '—';
+const firstAffiliation = article.affiliations[0] || '—';
+const remainingAuthors = article.authors.slice(1);
+const remainingAffiliations = article.affiliations.slice(1);
+---
+
+<BaseLayout title={article.titleZh}>
+  <div class="page">
+    <a class="cite" href="/">← 返回全部文献</a>
+    <header style="margin-top:20px">
+      <span class="eyebrow">Article record</span>
+      <h1>{article.titleZh}</h1>
+      <p class="muted">{article.titleEn}</p>
+      <div class="tags">
+        <span class="tag type">{article.category}</span>
+        <span class="tag specialty">{article.specialty}</span>
+        <span class="tag quality">IF {article.fiveYearJif}</span>
+        <span class="tag quality">{article.jcr}</span>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>文献信息</h2>
+      <table class="metadata">
+        <tr><th>PMID</th><td>{article.pmid}</td></tr>
+        <tr><th>原文</th><td><a class="cite" href={`https://pubmed.ncbi.nlm.nih.gov/${article.pmid}/`} target="_blank" rel="noreferrer">在 PubMed 查看原文 ↗</a></td></tr>
+        <tr><th>发表日期</th><td>{article.publicationDate}</td></tr>
+        <tr>
+          <th>作者</th>
+          <td>
+            <span>{firstAuthor}</span>
+            {remainingAuthors.length > 0 && <details class="metadata-disclosure"><summary>查看其他 {remainingAuthors.length} 位作者</summary><p>{remainingAuthors.join('；')}</p></details>}
+          </td>
+        </tr>
+        <tr>
+          <th>作者单位</th>
+          <td>
+            <span>{firstAffiliation}</span>
+            {remainingAffiliations.length > 0 && <details class="metadata-disclosure"><summary>查看其他 {remainingAffiliations.length} 条单位信息</summary><p>{remainingAffiliations.join('；')}</p></details>}
+          </td>
+        </tr>
+        <tr><th>期刊</th><td>{article.journal}</td></tr>
+        <tr><th>SCI 分区</th><td>{article.jcr}</td></tr>
+        <tr><th>IF</th><td>{article.fiveYearJif}</td></tr>
+        <tr><th>研究类型</th><td>{article.category} · {article.evidenceTrack}</td></tr>
+        <tr><th>所属专科</th><td>{article.specialty}</td></tr>
+      </table>
+    </section>
+
+    <section class="card"><h2>中文摘要</h2><p class="abstract">{article.abstractZh}</p></section>
+    <section class="card"><h2>英文摘要</h2><p class="abstract">{article.abstractEn}</p></section>
+  </div>
+</BaseLayout>
+
+<style>
+  .metadata-disclosure { margin-top: 10px; color: var(--muted); }
+  .metadata-disclosure summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+  .metadata-disclosure p { margin: 10px 0 0; line-height: 1.7; }
+</style>

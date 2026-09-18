@@ -1,0 +1,29 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ArticleCard from '../../components/ArticleCard.astro';
+import { articles } from '../../data/site';
+
+const topicMap = {
+  rhinology: '鼻科',
+  otology: '耳科',
+  laryngology: '咽喉科',
+  'nasopharyngeal-carcinoma': '鼻咽癌'
+} as const;
+
+export function getStaticPaths() {
+  return ['rhinology', 'otology', 'laryngology', 'nasopharyngeal-carcinoma']
+    .map((slug) => ({ params: { slug } }));
+}
+
+const slug = Astro.params.slug as keyof typeof topicMap;
+const topic = topicMap[slug];
+const topicArticles = articles.filter((article) => article.specialty === topic);
+---
+<BaseLayout title={topic}>
+  <div class="page">
+    <header class="topic-page-head topic-detail-head"><a class="back-link" href="/topics/">← 返回主题分类</a><h1>{topic}</h1><p class="muted">共 {topicArticles.length} 篇通过质量筛选的文献，按 PubMed 入库日展示。</p></header>
+    <section class="topic-detail-list" aria-label={`${topic}文献列表`}>
+      {topicArticles.map((article) => <ArticleCard article={article} />)}
+    </section>
+  </div>
+</BaseLayout>

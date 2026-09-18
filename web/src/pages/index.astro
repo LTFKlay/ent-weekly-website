@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ArticleCard from '../components/ArticleCard.astro';
+import BrowserControls from '../components/BrowserControls.astro';
+import { articles } from '../data/site';
+const entryDates = [...new Set(articles.map((article) => article.entryDate).filter(Boolean))].sort().reverse() as string[];
+---
+<BaseLayout title="全部文献">
+  <div class="page">
+    <div class="library-layout">
+      <BrowserControls section="dates" entryDates={entryDates} />
+      <div class="library-results">
+        <BrowserControls section="filters" entryDates={entryDates} />
+        <div id="article-groups" class="daily-groups">
+          {entryDates.map((date) => {
+            const group = articles.filter((article) => article.entryDate === date);
+            return <section id={`date-${date}`} class="group date-group" data-group={date}><h2 class="group-title">{date} <small>· {group.length} 篇</small></h2>{group.map((article) => <ArticleCard article={article} />)}</section>;
+          })}
+        </div>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

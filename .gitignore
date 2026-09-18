@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+node_modules/
+web/dist/
+data/*.db
+data/backups/
+data/snapshots/
+data/journal-quality.json
+!data/.gitkeep
+*.log
+

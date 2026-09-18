@@ -1,0 +1,6 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { siteContent } from '../data/site-content';
+const page = siteContent.project;
+---
+<BaseLayout title={page.title}><div class="page"><header class="page-head"><span class="eyebrow">{page.eyebrow}</span><h1>{page.title}</h1><p class="muted">{page.intro}</p></header>{page.sections.map(([heading, body]) => <section class="card"><h2>{heading}</h2><p>{body}</p></section>)}</div></BaseLayout>

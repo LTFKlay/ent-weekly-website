@@ -1,0 +1,54 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+type UpdateRecord = { date: string; count: number; generatedAt: string };
+
+const snapshotDir = process.env.SNAPSHOT_DIR && fs.existsSync(process.env.SNAPSHOT_DIR)
+  ? process.env.SNAPSHOT_DIR
+  : path.resolve(process.cwd(), '../data/snapshots');
+
+const formatTimestamp = (timestamp: number) => new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Asia/Shanghai', dateStyle: 'short', timeStyle: 'medium', hour12: false,
+}).format(new Date(timestamp));
+
+const updates: UpdateRecord[] = fs.existsSync(snapshotDir)
+  ? fs.readdirSync(snapshotDir)
+    .filter((file) => /^daily-\d{4}-\d{2}-\d{2}\.json$/.test(file))
+    .map((file) => {
+      const fullPath = path.join(snapshotDir, file);
+      const date = file.slice('daily-'.length, -'.json'.length);
+      const payload = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+      const count = (payload.articles || []).filter((article: any) =>
+        String(article.source_dates?.edat || '').startsWith(date),
+      ).length;
+      return { date, count, generatedAt: formatTimestamp(fs.statSync(fullPath).mtimeMs) };
+    })
+    .sort((left, right) => right.date.localeCompare(left.date))
+  : [];
+
+const totalArticles = updates.reduce((sum, entry) => sum + entry.count, 0);
+---
+
+<BaseLayout title="更新日志">
+  <div class="page">
+    <header class="page-head">
+      <h1>更新日志</h1>
+      <p class="muted">共 {updates.length} 天 · {totalArticles} 篇文献</p>
+    </header>
+
+    {updates.length > 0 ? <table class="update-log">
+      <thead><tr><th>日期</th><th>文章数</th><th>生成时间</th></tr></thead>
+      <tbody>{updates.map((entry) => <tr><td>{entry.date}</td><td>{entry.count}</td><td>{entry.generatedAt}</td></tr>)}</tbody>
+    </table> : <p class="muted">尚无已发布的日更新记录。</p>}
+  </div>
+</BaseLayout>
+
+<style>
+  .update-log { width: 100%; border-collapse: collapse; background: var(--surface); }
+  .update-log th, .update-log td { padding: 18px 24px; text-align: left; border-bottom: 1px solid var(--border); }
+  .update-log th { color: var(--muted); font-weight: 700; background: color-mix(in srgb, var(--surface) 88%, var(--canvas)); }
+  .update-log tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+  @media (max-width: 680px) { .update-log th, .update-log td { padding: 14px 12px; font-size: .85rem; } .update-log th:last-child, .update-log td:last-child { display: none; } }
+</style>

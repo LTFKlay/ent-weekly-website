@@ -1,0 +1,15 @@
+---
+import type { Article } from '../data/site';
+const { article } = Astro.props as { article: Article };
+---
+<a class="article-card" href={`/article/${article.pmid}/`} data-specialty={article.specialty} data-category={article.category} data-entry-date={article.entryDate || ''}>
+  <div class="article-card-copy">
+    <span class="journal">{article.journal}</span>
+    <h3>{article.titleZh}</h3>
+    <p class="title-en">{article.titleEn}</p>
+  </div>
+  <div class="article-card-footer">
+    <time>{article.entryDate || article.publicationDate}</time>
+    <div class="tags"><span class="tag type">{article.category}</span><span class="tag specialty">{article.specialty}</span><span class="tag quality">IF {article.fiveYearJif}</span><span class="tag quality">{article.jcr}</span></div>
+  </div>
+</a>
