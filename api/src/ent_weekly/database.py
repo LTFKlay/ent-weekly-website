@@ -147,8 +147,13 @@ class Database:
                 )
         return bool(rows)
 
-    def has_llm_record(self, pmid: str) -> bool:
+    def has_llm_record(self, pmid: str, prompt_version: str | None = None) -> bool:
         with self.connect() as connection:
+            if prompt_version:
+                return connection.execute(
+                    "SELECT 1 FROM llm_records WHERE pmid=? AND prompt_version=? LIMIT 1",
+                    (pmid, prompt_version),
+                ).fetchone() is not None
             return connection.execute("SELECT 1 FROM llm_records WHERE pmid=? LIMIT 1", (pmid,)).fetchone() is not None
 
     def decision_counts_for_edat(self, target_edat: str) -> dict[str, int]:
@@ -170,7 +175,11 @@ class Database:
                    FROM articles a
                    JOIN journal_quality q ON q.pmid = a.pmid
                    JOIN screening s ON s.pmid = a.pmid
-                   LEFT JOIN llm_records l ON l.pmid = a.pmid
+                   LEFT JOIN llm_records l ON l.rowid = (
+                     SELECT latest.rowid FROM llm_records latest
+                     WHERE latest.pmid = a.pmid
+                     ORDER BY latest.generated_at DESC, latest.rowid DESC LIMIT 1
+                   )
                    WHERE s.decision IN ('include', 'background_trend')
                    ORDER BY a.publication_date DESC, a.pmid DESC LIMIT ?""",
                 (limit,),
@@ -207,7 +216,11 @@ class Database:
                    JOIN article_sources src ON src.pmid = a.pmid
                    JOIN journal_quality q ON q.pmid = a.pmid
                    JOIN screening s ON s.pmid = a.pmid
-                   LEFT JOIN llm_records l ON l.pmid = a.pmid
+                   LEFT JOIN llm_records l ON l.rowid = (
+                     SELECT latest.rowid FROM llm_records latest
+                     WHERE latest.pmid = a.pmid
+                     ORDER BY latest.generated_at DESC, latest.rowid DESC LIMIT 1
+                   )
                    WHERE src.date_type = 'edat' AND src.source_date >= ? AND src.source_date <= ?
                      AND s.decision IN ('include', 'background_trend')
                    ORDER BY a.publication_date DESC, a.pmid DESC""",
@@ -242,7 +255,11 @@ class Database:
                    JOIN article_sources src ON src.pmid = a.pmid
                    JOIN journal_quality q ON q.pmid = a.pmid
                    JOIN screening s ON s.pmid = a.pmid
-                   LEFT JOIN llm_records l ON l.pmid = a.pmid
+                   LEFT JOIN llm_records l ON l.rowid = (
+                     SELECT latest.rowid FROM llm_records latest
+                     WHERE latest.pmid = a.pmid
+                     ORDER BY latest.generated_at DESC, latest.rowid DESC LIMIT 1
+                   )
                    WHERE ((src.date_type = 'edat' AND src.source_date >= ? AND src.source_date <= ?)
                       OR (src.date_type = 'pdat' AND src.source_date = ?))
                      AND s.decision IN ('include', 'background_trend')

@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .database import Database
-from .llm import DeepSeekClient, WEEKLY_PROMPT_VERSION
+from .llm import CLASSIFICATION_PROMPT_VERSION, DeepSeekClient, WEEKLY_PROMPT_VERSION
 from .models import WeeklySection, WeeklySummary
 from .pubmed import PubMedClient
 from .quality import QualityGate
@@ -28,9 +28,9 @@ class DailyPipeline:
         # A PDAT-backfilled article can already have an LLM record but still need its
         # newly observed EDAT source date for daily tracking and the changelog.
         for article in articles:
-            if self.database.has_llm_record(article.pmid):
+            if self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION):
                 self.database.upsert_candidate(article)
-        pending = [article for article in articles if not self.database.has_llm_record(article.pmid)]
+        pending = [article for article in articles if not self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION)]
         audit = {"run_id": run_id, "target_edat": target_edat.isoformat(), "retrieval": retrieval, "candidates": len(articles), "pending": len(pending), "included": 0, "background_trend": 0, "excluded": 0}
         self.database.start_run(run_id, target_edat.isoformat(), retrieval["query_version"], audit)
         try:
@@ -100,7 +100,7 @@ class WeeklyPipeline:
         articles, retrieval = await self.pubmed.retrieve("pdat", week_start.isoformat(), week_end.isoformat())
         audit = {"retrieval": retrieval, "candidates": len(articles), "reused": 0, "included": 0, "background_trend": 0, "excluded": 0}
         for article in articles:
-            if self.database.has_llm_record(article.pmid):
+            if self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION):
                 self.database.upsert_candidate(article)
                 audit["reused"] += 1
                 continue
