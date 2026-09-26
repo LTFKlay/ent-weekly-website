@@ -1,5 +1,6 @@
 services:
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: api/Dockerfile
@@ -23,6 +24,7 @@ services:
       retries: 3
 
   cron:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: cron/Dockerfile
@@ -35,11 +37,13 @@ services:
       JOURNAL_QUALITY_PATH: /data/journal-quality.json
     volumes:
       - ent_data:/data
+      - web_dist:/app/web_dist
     depends_on:
       api:
         condition: service_healthy
 
   web:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: web/Dockerfile
