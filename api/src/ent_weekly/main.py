@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from .database import Database
 from .settings import settings
 from .pipeline import DailyPipeline, WeeklyPipeline
+from .policy import SCREENING_POLICY_VERSION
 
 app = FastAPI(title="ENT Weekly API", version="0.1.0")
 database = Database(settings.db_path)
@@ -32,7 +33,7 @@ def require_internal(authorization: str | None = Header(default=None)) -> None:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", **database.health()}
+    return {"status": "ok", "screening_policy_version": SCREENING_POLICY_VERSION, **database.health()}
 
 
 @app.get("/api/articles")

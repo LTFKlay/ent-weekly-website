@@ -18,19 +18,23 @@
 
 ## 规则更新后的历史文献重筛
 
-检索或筛选规则升级后，已写入持久化数据库的历史文献不会因 `git pull` 自动重判。先在服务器完成 `docker compose up -d --build`，再按以下顺序执行；命令不会删除数据库、快照或 Docker 数据卷。
+本地只发布页面模板、检索规则与后端代码；服务器的 `ent_data` 卷是唯一的抓取、筛选、快照与线上数据来源。`data/ent_weekly.db`、日/周快照均不提交 Git。检索或筛选规则升级后，已写入该数据卷的历史文献不会因 `git pull` 自动重判。
+
+在服务器的 `/opt/ent-weekly` 中按以下顺序执行；命令不会删除数据库、快照或 Docker 数据卷。
 
 ```sh
-# 先查看预计受影响范围（不写入、不调用模型）
-docker compose exec api python -m ent_weekly.rescreen
+# 常规代码发布：重建服务镜像与静态站点
+git pull
+sh scripts/deploy_server.sh
 
-# 使用当前相关性规则与分类提示词重筛全部公开文献，并同步快照
-docker compose exec api python -m ent_weekly.rescreen --apply --reclassify
+# 规则更新发布：额外全量重筛历史文献并重建已有周报
+git pull
+sh scripts/deploy_server.sh --rescreen
 
-# 重建静态页面并写入站点共享卷
-docker compose exec cron sh -lc 'cd /app/web && npm run build && cp -R /app/dist/. /app/web_dist/'
+# 验证已排除文献不在 Nginx 静态目录中
+docker compose exec web sh -lc 'grep -R "Balance Wood" /usr/share/nginx/html || true'
 ```
 
-重筛会保留历史 LLM 审计记录，并在快照审计字段中写入本次重筛元数据。建议先用 `--limit 20 --apply --reclassify` 验证输出。
+重筛会保留历史 LLM 审计记录，并在快照审计字段中写入本次重筛元数据；LLM 临时失败的记录会保留旧公开状态并计入 `errors`。建议先用 `--limit 20 --apply --reclassify --refresh-weekly` 验证输出。服务器每日任务会继续抓取并按当前筛选策略版本重新判定候选文献。
 
 详细的数据规则见 [ENT-每日追踪与周报生产方案.md](./ENT-每日追踪与周报生产方案.md)。

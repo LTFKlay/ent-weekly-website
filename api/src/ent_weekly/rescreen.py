@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .database import Database
-from .llm import CLASSIFICATION_PROMPT_VERSION, DeepSeekClient
+from .llm import DeepSeekClient
 from .models import PubMedArticle
+from .policy import SCREENING_POLICY_VERSION
+from .pipeline import WeeklyPipeline
 from .screening import initial_exclusion
 from .settings import Settings
 
@@ -34,7 +36,19 @@ def _rewrite_snapshots(settings: Settings, database: Database, audit: dict) -> d
     return {"daily_removed": daily_removed, "weekly_removed": weekly_removed, "public_records": len(public_records)}
 
 
-async def run(*, apply: bool, reclassify: bool, limit: int | None, max_concurrent: int | None) -> dict:
+async def _refresh_weekly_reports(settings: Settings, database: Database) -> dict[str, object]:
+    refreshed, errors = [], []
+    for path in sorted(settings.weekly_snapshot_dir.glob("weekly-*.json")):
+        week_start = path.stem.removeprefix("weekly-")
+        try:
+            await WeeklyPipeline(settings, database).run(datetime.fromisoformat(week_start).date())
+            refreshed.append(week_start)
+        except Exception as error:
+            errors.append({"week_start": week_start, "error": type(error).__name__})
+    return {"refreshed": refreshed, "errors": errors}
+
+
+async def run(*, apply: bool, reclassify: bool, refresh_weekly: bool, limit: int | None, max_concurrent: int | None) -> dict:
     settings = Settings()
     database = Database(settings.db_path)
     database.initialize()
@@ -45,8 +59,9 @@ async def run(*, apply: bool, reclassify: bool, limit: int | None, max_concurren
     rule_exclusions = sum(bool(initial_exclusion(PubMedArticle.model_validate(record))) for record in records)
     audit = {
         "run_id": f"rescreen-{uuid.uuid4()}",
-        "prompt_version": CLASSIFICATION_PROMPT_VERSION,
+        "screening_policy_version": SCREENING_POLICY_VERSION,
         "reclassify": reclassify,
+        "refresh_weekly": refresh_weekly,
         "selected": len(records),
         "rule_exclusions": rule_exclusions,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -61,7 +76,7 @@ async def run(*, apply: bool, reclassify: bool, limit: int | None, max_concurren
         article = PubMedArticle.model_validate(record)
         rule_reason = initial_exclusion(article)
         if rule_reason:
-            database.record_exclusion(audit["run_id"], article, rule_reason)
+            database.record_exclusion(audit["run_id"], article, rule_reason, SCREENING_POLICY_VERSION)
             return "exclude"
         if not llm:
             return "unchanged"
@@ -72,7 +87,7 @@ async def run(*, apply: bool, reclassify: bool, limit: int | None, max_concurren
             return "error"
         database.record_processed(
             audit["run_id"], article, classification, classification.screening_decision,
-            classification.classification_reason, None,
+            classification.classification_reason, None, SCREENING_POLICY_VERSION,
         )
         return classification.screening_decision
 
@@ -83,6 +98,8 @@ async def run(*, apply: bool, reclassify: bool, limit: int | None, max_concurren
     audit["unchanged"] = decisions.count("unchanged")
     audit["errors"] = decisions.count("error")
     audit["completed_at"] = datetime.now(timezone.utc).isoformat()
+    if refresh_weekly:
+        audit["weekly_refresh"] = await _refresh_weekly_reports(settings, database)
     audit["snapshots"] = _rewrite_snapshots(settings, database, audit)
     return {**audit, "status": "success"}
 
@@ -91,12 +108,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="执行写入；省略时仅输出预计受影响的记录数。")
     parser.add_argument("--reclassify", action="store_true", help="使用当前 LLM 提示词重判所有选中的公开文献。")
+    parser.add_argument("--refresh-weekly", action="store_true", help="重建已有周报，移除旧摘要中的已排除文献。")
     parser.add_argument("--limit", type=int, help="最多处理的公开文献数，可用于先小批验证。")
     parser.add_argument("--max-concurrent", type=int, help="覆盖 LLM 并发数。")
     args = parser.parse_args()
     result = asyncio.run(run(
         apply=args.apply,
         reclassify=args.reclassify,
+        refresh_weekly=args.refresh_weekly,
         limit=args.limit,
         max_concurrent=args.max_concurrent,
     ))

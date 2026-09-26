@@ -6,8 +6,9 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .database import Database
-from .llm import CLASSIFICATION_PROMPT_VERSION, DeepSeekClient, WEEKLY_PROMPT_VERSION
+from .llm import DeepSeekClient, WEEKLY_PROMPT_VERSION
 from .models import WeeklySection, WeeklySummary
+from .policy import SCREENING_POLICY_VERSION
 from .pubmed import PubMedClient
 from .quality import QualityGate
 from .screening import initial_exclusion
@@ -28,10 +29,10 @@ class DailyPipeline:
         # A PDAT-backfilled article can already have an LLM record but still need its
         # newly observed EDAT source date for daily tracking and the changelog.
         for article in articles:
-            if self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION):
+            if self.database.has_screening_policy(article.pmid, SCREENING_POLICY_VERSION):
                 self.database.upsert_candidate(article)
-        pending = [article for article in articles if not self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION)]
-        audit = {"run_id": run_id, "target_edat": target_edat.isoformat(), "retrieval": retrieval, "candidates": len(articles), "pending": len(pending), "included": 0, "background_trend": 0, "excluded": 0}
+        pending = [article for article in articles if not self.database.has_screening_policy(article.pmid, SCREENING_POLICY_VERSION)]
+        audit = {"run_id": run_id, "target_edat": target_edat.isoformat(), "retrieval": retrieval, "screening_policy_version": SCREENING_POLICY_VERSION, "candidates": len(articles), "pending": len(pending), "included": 0, "background_trend": 0, "excluded": 0}
         self.database.start_run(run_id, target_edat.isoformat(), retrieval["query_version"], audit)
         try:
             semaphore = asyncio.Semaphore(self.settings.llm_max_concurrent)
@@ -62,16 +63,16 @@ class DailyPipeline:
         quality, quality_reason = self.quality.resolve(article)
         rule_exclusion = initial_exclusion(article)
         if rule_exclusion or quality_reason:
-            self.database.record_exclusion(run_id, article, rule_exclusion or quality_reason or "Exclude: quality gate.")
+            self.database.record_exclusion(run_id, article, rule_exclusion or quality_reason or "Exclude: quality gate.", SCREENING_POLICY_VERSION)
             return "exclude"
         try:
             classification = await self.llm.classify_and_translate(article)
         except Exception as error:
-            self.database.record_exclusion(run_id, article, f"Exclude: LLM classification unavailable ({type(error).__name__}).")
+            self.database.record_exclusion(run_id, article, f"Exclude: LLM classification unavailable ({type(error).__name__}).", SCREENING_POLICY_VERSION)
             return "exclude"
         decision = classification.screening_decision
         reason = classification.classification_reason
-        self.database.record_processed(run_id, article, classification, decision, reason, quality)
+        self.database.record_processed(run_id, article, classification, decision, reason, quality, SCREENING_POLICY_VERSION)
         return decision
 
     def _write_snapshot(self, target_edat: date, audit: dict) -> None:
@@ -100,25 +101,25 @@ class WeeklyPipeline:
         articles, retrieval = await self.pubmed.retrieve("pdat", week_start.isoformat(), week_end.isoformat())
         audit = {"retrieval": retrieval, "candidates": len(articles), "reused": 0, "included": 0, "background_trend": 0, "excluded": 0}
         for article in articles:
-            if self.database.has_llm_record(article.pmid, CLASSIFICATION_PROMPT_VERSION):
+            if self.database.has_screening_policy(article.pmid, SCREENING_POLICY_VERSION):
                 self.database.upsert_candidate(article)
                 audit["reused"] += 1
                 continue
             quality, quality_reason = self.quality.resolve(article)
             rule_exclusion = initial_exclusion(article)
             if rule_exclusion or quality_reason:
-                self.database.record_exclusion(f"weekly-pdat-{week_start.isoformat()}", article, rule_exclusion or quality_reason or "Exclude: quality gate.")
+                self.database.record_exclusion(f"weekly-pdat-{week_start.isoformat()}", article, rule_exclusion or quality_reason or "Exclude: quality gate.", SCREENING_POLICY_VERSION)
                 audit["excluded"] += 1
                 continue
             try:
                 classification = await self.llm.classify_and_translate(article)
             except Exception as error:
-                self.database.record_exclusion(f"weekly-pdat-{week_start.isoformat()}", article, f"Exclude: LLM classification unavailable ({type(error).__name__}).")
+                self.database.record_exclusion(f"weekly-pdat-{week_start.isoformat()}", article, f"Exclude: LLM classification unavailable ({type(error).__name__}).", SCREENING_POLICY_VERSION)
                 audit["excluded"] += 1
                 continue
             self.database.record_processed(
                 f"weekly-pdat-{week_start.isoformat()}", article, classification,
-                classification.screening_decision, classification.classification_reason, quality,
+                classification.screening_decision, classification.classification_reason, quality, SCREENING_POLICY_VERSION,
             )
             if classification.screening_decision == "include":
                 audit["included"] += 1
@@ -197,7 +198,8 @@ class WeeklyPipeline:
             "week_end": week_end.isoformat(),
             "timezone": "Asia/Shanghai",
             "source": "PubMed EDAT monitoring list plus PDAT publication-date backfill",
-            "query_version": "ent-v1-2026-09-17",
+            "query_version": self.pubmed.query_config["version"],
+            "screening_policy_version": SCREENING_POLICY_VERSION,
             "public_records": len(records),
             "pdat": pdat_audit,
             "llm_section_fallbacks": llm_section_fallbacks,

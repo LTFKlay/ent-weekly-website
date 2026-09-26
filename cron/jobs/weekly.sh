@@ -10,4 +10,4 @@ curl -fsS -X POST http://api:8080/internal/run-weekly \
 
 cd /app/web
 npm run build
-cp -R /app/dist/. /app/web_dist/
+rsync -a --delete /app/dist/ /app/web_dist/

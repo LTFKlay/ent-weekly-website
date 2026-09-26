@@ -3,7 +3,7 @@ set -eu
 
 cd /app/web
 npm run build
-cp -R /app/dist/. /app/web_dist/
+rsync -a --delete /app/dist/ /app/web_dist/
 
 # Keep scheduling inside the container so the image does not depend on a
 # separately downloaded scheduler binary. TZ is supplied by docker-compose.

@@ -48,11 +48,13 @@ CREATE TABLE IF NOT EXISTS screening (
   primary_specialty TEXT,
   evidence_track TEXT,
   display_category TEXT,
+  screening_policy_version TEXT NOT NULL DEFAULT 'legacy',
   screened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS llm_records (
   pmid TEXT NOT NULL REFERENCES articles(pmid) ON DELETE CASCADE,
   prompt_version TEXT NOT NULL,
+  screening_policy_version TEXT NOT NULL DEFAULT 'legacy',
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   output_json TEXT NOT NULL,
@@ -114,6 +116,16 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(screening)").fetchall()}
+            if "screening_policy_version" not in columns:
+                connection.execute(
+                    "ALTER TABLE screening ADD COLUMN screening_policy_version TEXT NOT NULL DEFAULT 'legacy'"
+                )
+            llm_columns = {row["name"] for row in connection.execute("PRAGMA table_info(llm_records)").fetchall()}
+            if "screening_policy_version" not in llm_columns:
+                connection.execute(
+                    "ALTER TABLE llm_records ADD COLUMN screening_policy_version TEXT NOT NULL DEFAULT 'legacy'"
+                )
 
     def health(self) -> dict[str, int]:
         with self.connect() as connection:
@@ -151,10 +163,18 @@ class Database:
         with self.connect() as connection:
             if prompt_version:
                 return connection.execute(
-                    "SELECT 1 FROM llm_records WHERE pmid=? AND prompt_version=? LIMIT 1",
-                    (pmid, prompt_version),
+                    """SELECT 1 FROM llm_records
+                       WHERE pmid=? AND (prompt_version=? OR screening_policy_version=?) LIMIT 1""",
+                    (pmid, prompt_version, prompt_version),
                 ).fetchone() is not None
             return connection.execute("SELECT 1 FROM llm_records WHERE pmid=? LIMIT 1", (pmid,)).fetchone() is not None
+
+    def has_screening_policy(self, pmid: str, policy_version: str) -> bool:
+        with self.connect() as connection:
+            return connection.execute(
+                "SELECT 1 FROM screening WHERE pmid=? AND screening_policy_version=? LIMIT 1",
+                (pmid, policy_version),
+            ).fetchone() is not None
 
     def decision_counts_for_edat(self, target_edat: str) -> dict[str, int]:
         source_date = f"{target_edat}..{target_edat}"
@@ -171,7 +191,7 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT a.*, q.jcr_quartile, q.five_year_jif, s.decision, s.primary_specialty,
-                   s.evidence_track, s.display_category, l.output_json
+                   s.evidence_track, s.display_category, s.screening_policy_version, l.output_json
                    FROM articles a
                    JOIN journal_quality q ON q.pmid = a.pmid
                    JOIN screening s ON s.pmid = a.pmid
@@ -211,7 +231,7 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT DISTINCT a.*, q.jcr_quartile, q.five_year_jif, s.decision,
-                          s.primary_specialty, s.evidence_track, s.display_category, l.output_json
+                          s.primary_specialty, s.evidence_track, s.display_category, s.screening_policy_version, l.output_json
                    FROM articles a
                    JOIN article_sources src ON src.pmid = a.pmid
                    JOIN journal_quality q ON q.pmid = a.pmid
@@ -250,7 +270,7 @@ class Database:
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT DISTINCT a.*, q.jcr_quartile, q.five_year_jif, s.decision,
-                          s.primary_specialty, s.evidence_track, s.display_category, l.output_json
+                          s.primary_specialty, s.evidence_track, s.display_category, s.screening_policy_version, l.output_json
                    FROM articles a
                    JOIN article_sources src ON src.pmid = a.pmid
                    JOIN journal_quality q ON q.pmid = a.pmid
@@ -326,13 +346,23 @@ class Database:
                     (article.pmid, date_type, source_date, json.dumps(article.topic_matches)),
                 )
 
-    def record_exclusion(self, run_id: str, article: PubMedArticle, reason: str) -> None:
+    def record_exclusion(
+        self,
+        run_id: str,
+        article: PubMedArticle,
+        reason: str,
+        policy_version: str = "legacy",
+    ) -> None:
         self.upsert_candidate(article)
         with self.connect() as connection:
             connection.execute("INSERT OR REPLACE INTO exclusions(run_id,pmid,reason) VALUES(?,?,?)", (run_id, article.pmid, reason))
-            connection.execute("INSERT OR REPLACE INTO screening(pmid,decision,reason) VALUES(?,?,?)", (article.pmid, "exclude", reason))
+            connection.execute(
+                """INSERT OR REPLACE INTO screening(pmid,decision,reason,screening_policy_version)
+                   VALUES(?,?,?,?)""",
+                (article.pmid, "exclude", reason, policy_version),
+            )
 
-    def record_included(self, record: ArticleRecord) -> None:
+    def record_included(self, record: ArticleRecord, policy_version: str = "legacy") -> None:
         if not record.classification:
             raise ValueError("Included record requires an LLM classification.")
         self.upsert_candidate(record)
@@ -345,16 +375,19 @@ class Database:
             )
             classification = record.classification
             connection.execute(
-                """INSERT OR REPLACE INTO screening(pmid,decision,reason,primary_specialty,evidence_track,display_category)
-                   VALUES(?,?,?,?,?,?)""",
+                """INSERT OR REPLACE INTO screening(
+                     pmid,decision,reason,primary_specialty,evidence_track,display_category,screening_policy_version
+                   ) VALUES(?,?,?,?,?,?,?)""",
                 (record.pmid, record.decision, record.screening_reason, classification.primary_specialty,
-                 classification.evidence_track, classification.display_category),
+                 classification.evidence_track, classification.display_category, policy_version),
             )
             connection.execute(
-                """INSERT OR REPLACE INTO llm_records(pmid,prompt_version,provider,model,output_json,status,generated_at)
-                   VALUES(?,?,?,?,?,?,?)""",
-                (record.pmid, classification.prompt_version, classification.provider, classification.model,
-                 classification.model_dump_json(), "success", classification.generated_at.isoformat()),
+                """INSERT OR REPLACE INTO llm_records(
+                     pmid,prompt_version,screening_policy_version,provider,model,output_json,status,generated_at
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (record.pmid, _audit_prompt_version(policy_version, classification.prompt_version), policy_version,
+                 classification.provider, classification.model, classification.model_dump_json(), "success",
+                 classification.generated_at.isoformat()),
             )
 
     def record_processed(
@@ -365,6 +398,7 @@ class Database:
         decision: str,
         reason: str,
         quality: JournalQuality | None,
+        policy_version: str = "legacy",
     ) -> None:
         """Persist a completed LLM pass, including records later excluded by quality rules."""
         self.upsert_candidate(article)
@@ -377,16 +411,19 @@ class Database:
                      quality.five_year_jif, int(quality.cas_warning_2025), quality.source),
                 )
             connection.execute(
-                """INSERT OR REPLACE INTO screening(pmid,decision,reason,primary_specialty,evidence_track,display_category)
-                   VALUES(?,?,?,?,?,?)""",
+                """INSERT OR REPLACE INTO screening(
+                     pmid,decision,reason,primary_specialty,evidence_track,display_category,screening_policy_version
+                   ) VALUES(?,?,?,?,?,?,?)""",
                 (article.pmid, decision, reason, classification.primary_specialty,
-                 classification.evidence_track, classification.display_category),
+                 classification.evidence_track, classification.display_category, policy_version),
             )
             connection.execute(
-                """INSERT OR REPLACE INTO llm_records(pmid,prompt_version,provider,model,output_json,status,generated_at)
-                   VALUES(?,?,?,?,?,?,?)""",
-                (article.pmid, classification.prompt_version, classification.provider, classification.model,
-                 classification.model_dump_json(), "success", classification.generated_at.isoformat()),
+                """INSERT OR REPLACE INTO llm_records(
+                     pmid,prompt_version,screening_policy_version,provider,model,output_json,status,generated_at
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (article.pmid, _audit_prompt_version(policy_version, classification.prompt_version), policy_version,
+                 classification.provider, classification.model, classification.model_dump_json(), "success",
+                 classification.generated_at.isoformat()),
             )
             if decision == "exclude":
                 connection.execute(
@@ -412,3 +449,14 @@ class Database:
         else:
             result.pop("output_json", None)
         return result
+
+
+def _audit_prompt_version(policy_version: str, classifier_prompt_version: str) -> str:
+    """Make each screening policy retain its own LLM audit row.
+
+    The legacy primary key is ``(pmid, prompt_version)``.  Including the full
+    policy in the stored key prevents a query-rule-only upgrade from replacing
+    the previous classification result, while the raw classifier version stays
+    inside ``output_json`` for inspection.
+    """
+    return f"policy:{policy_version};classifier:{classifier_prompt_version}"
