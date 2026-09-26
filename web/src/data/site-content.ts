@@ -26,7 +26,7 @@ export const siteContent = {
     sections: [
       ['作者', 'KlayLTF'],
       ['联系渠道', 'ltfklay2023@163.com'],
-      ['致谢', '本项目感谢@Linastro开源'],
+      ['致谢', '本网站参考的Linastro的Github开源项目搭建'],
     ],
   },
   author: {

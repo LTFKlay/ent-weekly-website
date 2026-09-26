@@ -11,6 +11,26 @@ const firstAuthor = article.authors[0] || '—';
 const firstAffiliation = article.affiliations[0] || '—';
 const remainingAuthors = article.authors.slice(1);
 const remainingAffiliations = article.affiliations.slice(1);
+
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+})[character] || character);
+
+const structuredLabel = /^(?:([A-Z][A-Z /-]{1,48}:)|([^\n：]{1,30}：))\s*(.*)$/;
+
+const formatAbstract = (abstract: string) => abstract.split(/\r?\n/)
+  .map((line) => {
+    const match = line.match(structuredLabel);
+    if (!match) return escapeHtml(line);
+    const label = match[1] || match[2];
+    const content = match[3];
+    return `<strong class="abstract-label">${escapeHtml(label)}</strong>${content ? ` ${escapeHtml(content)}` : ''}`;
+  })
+  .join('<br>');
 ---
 
 <BaseLayout title={article.titleZh}>
@@ -56,8 +76,8 @@ const remainingAffiliations = article.affiliations.slice(1);
       </table>
     </section>
 
-    <section class="card"><h2>中文摘要</h2><p class="abstract">{article.abstractZh}</p></section>
-    <section class="card"><h2>英文摘要</h2><p class="abstract">{article.abstractEn}</p></section>
+    <section class="card"><h2>中文摘要</h2><p class="abstract" set:html={formatAbstract(article.abstractZh)} /></section>
+    <section class="card"><h2>英文摘要</h2><p class="abstract" set:html={formatAbstract(article.abstractEn)} /></section>
   </div>
 </BaseLayout>
 
@@ -65,4 +85,5 @@ const remainingAffiliations = article.affiliations.slice(1);
   .metadata-disclosure { margin-top: 10px; color: var(--muted); }
   .metadata-disclosure summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
   .metadata-disclosure p { margin: 10px 0 0; line-height: 1.7; }
+  :global(.abstract-label) { color: #102c28; font-weight: 800; }
 </style>

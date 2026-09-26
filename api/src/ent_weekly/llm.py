@@ -8,7 +8,7 @@ from .models import Classification, PubMedArticle, WeeklySummary
 from .settings import Settings
 
 
-CLASSIFICATION_PROMPT_VERSION = "ent-classify-translate-v1"
+CLASSIFICATION_PROMPT_VERSION = "ent-classify-translate-v2"
 WEEKLY_PROMPT_VERSION = "ent-weekly-summary-v1"
 
 
@@ -42,9 +42,18 @@ class DeepSeekClient:
             "You are a medical literature classifier and translator. Return JSON only. "
             "Read the entire supplied PubMed abstract. Do not infer missing methods, outcomes, effects, safety, or causality. "
             "Assign screening_decision as include, background_trend, or exclude. "
+            "Include or background_trend only when the study population, disease, intervention, or primary outcome is directly within "
+            "rhinology, otology, laryngology, or nasopharyngeal carcinoma. A specialty term mentioned only in an exclusion criterion, "
+            "a negative history, or a comorbidity list is not evidence of relevance. Do not infer otology from general balance alone. "
+            "Studies of ankle, knee, hip, gait, lower-limb rehabilitation, or general healthy-adult balance must be exclude unless an ENT "
+            "condition or ENT-specific outcome is the explicit central research question. For example, 'without vestibular disorders' means "
+            "the article is not a vestibular study. State the concrete reason in classification_reason. "
             "Assign one primary_specialty from rhinology, otology, laryngology, nasopharyngeal_carcinoma; "
             "one evidence_track from clinical, basic_translational; one display_category from clinical, ai_ml, basic, review_meta, guideline_consensus. "
-            "Translate title and entire abstract into precise Chinese, preserving section order. "
+            "Translate title and entire abstract into precise Chinese. Preserve every structured-abstract label and its order: "
+            "render each AbstractText@Label as its Chinese equivalent followed by a full-width colon, for example "
+            "BACKGROUND: as 背景：, METHODS: as 方法：, RESULTS: as 结果：, and CONCLUSION: as 结论：. "
+            "Do not omit, merge, or summarize labeled sections; keep each labeled section on its own line. "
             "Your JSON must contain exactly these required keys: screening_decision, primary_specialty, evidence_track, display_category, "
             "classification_reason, title_zh, abstract_zh. Do not use an alternative key named reason. "
             f"PMID: {article.pmid}\nTITLE: {article.title_en}\nABSTRACT: {article.abstract_en}"
@@ -103,6 +112,30 @@ class DeepSeekClient:
         value.update({"provider": "DeepSeek", "model": self.settings.deepseek_model, "prompt_version": CLASSIFICATION_PROMPT_VERSION, "generated_at": datetime.now(timezone.utc)})
         return Classification.model_validate(value)
 
+    async def translate_title_and_abstract(self, article: PubMedArticle) -> dict[str, str]:
+        """Refresh a translation while preserving an existing screening decision."""
+        if not self.settings.deepseek_api_key or not self.settings.deepseek_model:
+            raise RuntimeError("DeepSeek credentials/model are not configured.")
+        prompt = (
+            "Return JSON only with exactly two keys: title_zh and abstract_zh. "
+            "Faithfully translate the supplied PubMed title and complete abstract into Chinese. "
+            "Preserve every structured-abstract label and its order: render each label in Chinese followed by a full-width colon, "
+            "for example BACKGROUND: as 背景：, METHODS: as 方法：, RESULTS: as 结果：, and CONCLUSION: as 结论：. "
+            "Do not omit, merge, invent, or summarize sections. Keep each labeled section on its own line.\n"
+            f"TITLE: {article.title_en}\nABSTRACT: {article.abstract_en}"
+        )
+        value = await self._json_completion({
+            "model": self.settings.deepseek_model,
+            "temperature": 0.1,
+            "thinking": {"type": "disabled"},
+            "max_tokens": 4000,
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": prompt}],
+        })
+        if not isinstance(value.get("title_zh"), str) or not isinstance(value.get("abstract_zh"), str):
+            raise RuntimeError("DeepSeek translation response is missing required fields.")
+        return {"title_zh": value["title_zh"], "abstract_zh": value["abstract_zh"]}
+
     async def summarize_week(self, payload: dict) -> WeeklySummary:
         if not self.settings.deepseek_api_key or not self.settings.deepseek_model:
             raise RuntimeError("DeepSeek credentials/model are not configured.")
@@ -126,6 +159,9 @@ class DeepSeekClient:
             "Write a polished Chinese weekly-report paragraph based exclusively on the supplied PubMed records. "
             "Do not make recommendations or infer unreported data. State '摘要未报告' where needed. "
             "Use a continuous editorial paragraph rather than bullets. Keep markdown to 180–260 Chinese words. "
+            "The payload field continuation indicates that this paragraph follows an earlier paragraph in the same specialty and category. "
+            "When continuation is true, start directly with evidence and never add a recurring overview such as '本周鼻科临床研究涵盖…' or any sentence beginning with '本周'. "
+            "Only a non-continuation paragraph may use one brief section overview. "
             "When citing a record in the paragraph, use exactly the token [[PMID:12345678]] immediately after the relevant statement. "
             "The pmids array must only contain supplied PMIDs that are discussed in markdown. "
             "Use each supplied record at most once and retain the original PMID identifiers.\n"

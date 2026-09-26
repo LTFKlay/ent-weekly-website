@@ -17,7 +17,9 @@ export function getStaticPaths() {
 
 const slug = Astro.params.slug as keyof typeof topicMap;
 const topic = topicMap[slug];
-const topicArticles = articles.filter((article) => article.specialty === topic);
+const topicArticles = articles
+  .filter((article) => article.specialty === topic)
+  .sort((left, right) => (right.entryDate || right.publicationDate).localeCompare(left.entryDate || left.publicationDate));
 ---
 <BaseLayout title={topic}>
   <div class="page">

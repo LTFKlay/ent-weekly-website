@@ -36,8 +36,8 @@ const citation = (pmid: string) => {
   const number = citationNumber.get(pmid);
   return number ? `<sup class="inline-citation"><a href="/article/${pmid}/" aria-label="查看文献 [${number}]">[${number}]</a></sup>` : pmid;
 };
-const removeBoilerplateLead = (value: string) => value.replace(/^本周[^。]{0,48}证据涵盖[^。]*。\s*/, '');
-const renderParagraph = (value: string) => escapeHtml(removeBoilerplateLead(value))
+const removeContinuationLead = (value: string) => value.replace(/^本周[^。]{0,160}。\s*/, '');
+const renderParagraph = (value: string, isContinuation: boolean) => escapeHtml(isContinuation ? removeContinuationLead(value) : value)
   .replace(/(?:[（(]\s*)?\[\[PMID:(\d{8})\]\](?:\s*[）)])?|(?:[（(]\s*)?(?:PMID\s*|PMID：)(\d{8})(?:\s*[）)])?|(?:[（(]\s*)?(?<!\d)(\d{8})(?!\d)(?:\s*[）)])?/gi, (_, tagged, labeled, plain) => citation(tagged || labeled || plain))
   .replace(/\n/g, '<br />');
 const groupedSections = specialtyOrder.map((specialty) => ({
@@ -71,7 +71,7 @@ const reportTitle = `${report.summary.week_start} – ${report.summary.week_end}
           <header class="specialty-heading">{specialtyLabels[group.specialty]}</header>
           {group.categories.map((category) => <article class="evidence-block">
             <h2>{categoryLabels[category.category] || category.category}</h2>
-            {category.sections.map((section: any) => <p set:html={renderParagraph(section.markdown)}></p>)}
+            {category.sections.map((section: any, index: number) => <p set:html={renderParagraph(section.markdown, index > 0)}></p>)}
           </article>)}
         </section>)}
 
@@ -85,6 +85,18 @@ const reportTitle = `${report.summary.week_start} – ${report.summary.week_end}
   </div>
 </BaseLayout>
 
+<script>
+  document.querySelector('.weekly-toc')?.addEventListener('click', (event) => {
+    const link = (event.target as Element).closest<HTMLAnchorElement>('a[href^="#"]');
+    if (!link?.hash) return;
+    const target = document.getElementById(link.hash.slice(1));
+    if (!target) return;
+    event.preventDefault();
+    history.pushState(null, '', link.hash);
+    window.scrollTo({ top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - 88), behavior: 'instant' });
+  });
+</script>
+
 <style>
   .weekly-report { max-width: 960px; }
   .weekly-head { padding: 8px 0 26px; border-bottom: 2px solid var(--accent); }
@@ -95,6 +107,7 @@ const reportTitle = `${report.summary.week_start} – ${report.summary.week_end}
   .weekly-toc a { padding: 7px 10px; border-left: 2px solid var(--line); color: var(--muted); font-size: .88rem; font-weight: 700; text-decoration: none; transition: border-color .18s ease, color .18s ease, background .18s ease; }
   .weekly-toc a:hover { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent-strong); }
   .report-body { min-width: 0; }
+  .specialty-section, .references { scroll-margin-top: 88px; }
   .specialty-section { margin: 40px 0; }
   .specialty-heading { margin-bottom: 18px; color: var(--accent-strong); font-size: 1.45rem; font-weight: 800; letter-spacing: -.03em; }
   .specialty-otology .specialty-heading { color: #236b91; }

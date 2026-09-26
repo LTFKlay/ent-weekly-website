@@ -67,6 +67,15 @@ class PubMedClient:
     def _text(element: ET.Element | None) -> str:
         return "".join(element.itertext()).strip() if element is not None else ""
 
+    @classmethod
+    def _abstract_section_text(cls, element: ET.Element) -> str:
+        """Preserve PubMed's optional structured-abstract label verbatim."""
+        content = cls._text(element)
+        if not content:
+            return ""
+        label = element.attrib.get("Label", "").strip().rstrip(":")
+        return f"{label}: {content}" if label else content
+
     def _parse(self, xml: str) -> list[PubMedArticle]:
         root = ET.fromstring(xml)
         parsed: list[PubMedArticle] = []
@@ -75,7 +84,11 @@ class PubMedClient:
             article = citation.find("Article") if citation is not None else None
             pmid = self._text(citation.find("PMID") if citation is not None else None)
             title = self._text(article.find("ArticleTitle") if article is not None else None)
-            abstract = "\n".join(self._text(item) for item in (article.findall("Abstract/AbstractText") if article is not None else []) if self._text(item))
+            abstract_parts = [
+                self._abstract_section_text(item)
+                for item in (article.findall("Abstract/AbstractText") if article is not None else [])
+            ]
+            abstract = "\n".join(part for part in abstract_parts if part)
             journal = self._text(article.find("Journal/Title") if article is not None else None)
             publication_date = self._text(article.find("Journal/JournalIssue/PubDate/Year") if article is not None else None)
             identifiers = {item.attrib.get("IdType", "").lower(): self._text(item) for item in node.findall("PubmedData/ArticleIdList/ArticleId")}

@@ -1,5 +1,5 @@
 {
-  "version": "ent-v1-2026-09-17",
+  "version": "ent-v2-2026-09-26",
   "source": "../../耳鼻喉周报PubMed检索规则.md",
   "source_version": "v1 (2026-09-17)",
   "global_exclusion": "(\"traditional Chinese medicine\"[tiab] OR \"chinese medicine\"[tiab] OR \"Chinese herbal medicine\"[tiab] OR \"chinese herbal preparation*\"[tiab] OR acupuncture[tiab] OR electroacupuncture[tiab] OR moxibustion[tiab] OR tuina[tiab] OR cupping[tiab] OR \"Chinese patent medicine\"[tiab] OR TCM[tiab])",

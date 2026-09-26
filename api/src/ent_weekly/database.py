@@ -120,6 +120,33 @@ class Database:
             count = connection.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
         return {"articles": count}
 
+    def list_public_pmids(self) -> list[str]:
+        """Return every published PMID so source metadata can be refreshed safely."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT a.pmid FROM articles a
+                   JOIN screening s ON s.pmid = a.pmid
+                   WHERE s.decision IN ('include', 'background_trend')
+                   ORDER BY a.pmid"""
+            ).fetchall()
+        return [str(row["pmid"]) for row in rows]
+
+    def update_translation(self, pmid: str, title_zh: str, abstract_zh: str) -> bool:
+        """Replace only translated fields; never alter the screening decision."""
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT rowid, output_json FROM llm_records WHERE pmid=?", (pmid,)
+            ).fetchall()
+            for row in rows:
+                payload = json.loads(row["output_json"])
+                payload["title_zh"] = title_zh
+                payload["abstract_zh"] = abstract_zh
+                connection.execute(
+                    "UPDATE llm_records SET output_json=? WHERE rowid=?",
+                    (json.dumps(payload, ensure_ascii=False), row["rowid"]),
+                )
+        return bool(rows)
+
     def has_llm_record(self, pmid: str) -> bool:
         with self.connect() as connection:
             return connection.execute("SELECT 1 FROM llm_records WHERE pmid=? LIMIT 1", (pmid,)).fetchone() is not None
@@ -185,6 +212,42 @@ class Database:
                      AND s.decision IN ('include', 'background_trend')
                    ORDER BY a.publication_date DESC, a.pmid DESC""",
                 (start_key, end_key),
+            ).fetchall()
+            records = [self._serialize(row) for row in rows]
+            if not records:
+                return records
+            pmids = [record["pmid"] for record in records]
+            placeholders = ",".join("?" for _ in pmids)
+            source_rows = connection.execute(
+                f"SELECT pmid, date_type, source_date FROM article_sources WHERE pmid IN ({placeholders})",
+                pmids,
+            ).fetchall()
+        sources_by_pmid: dict[str, dict[str, str]] = {pmid: {} for pmid in pmids}
+        for source in source_rows:
+            sources_by_pmid[source["pmid"]][source["date_type"]] = source["source_date"]
+        for record in records:
+            record["source_dates"] = sources_by_pmid[record["pmid"]]
+        return records
+
+    def list_articles_for_report_week(self, week_start: str, week_end: str) -> list[dict]:
+        """Return public records from the EDAT monitoring set plus PDAT backfill."""
+        start_key = f"{week_start}..{week_start}"
+        end_key = f"{week_end}..{week_end}"
+        pdat_key = f"{week_start}..{week_end}"
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT DISTINCT a.*, q.jcr_quartile, q.five_year_jif, s.decision,
+                          s.primary_specialty, s.evidence_track, s.display_category, l.output_json
+                   FROM articles a
+                   JOIN article_sources src ON src.pmid = a.pmid
+                   JOIN journal_quality q ON q.pmid = a.pmid
+                   JOIN screening s ON s.pmid = a.pmid
+                   LEFT JOIN llm_records l ON l.pmid = a.pmid
+                   WHERE ((src.date_type = 'edat' AND src.source_date >= ? AND src.source_date <= ?)
+                      OR (src.date_type = 'pdat' AND src.source_date = ?))
+                     AND s.decision IN ('include', 'background_trend')
+                   ORDER BY a.publication_date DESC, a.pmid DESC""",
+                (start_key, end_key, pdat_key),
             ).fetchall()
             records = [self._serialize(row) for row in rows]
             if not records:

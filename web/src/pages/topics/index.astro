@@ -5,5 +5,7 @@ const topics = [
   { label: '鼻科', slug: 'rhinology' }, { label: '耳科', slug: 'otology' },
   { label: '咽喉科', slug: 'laryngology' }, { label: '鼻咽癌', slug: 'nasopharyngeal-carcinoma' }
 ];
+const newestFirst = (left: typeof articles[number], right: typeof articles[number]) =>
+  (right.entryDate || right.publicationDate).localeCompare(left.entryDate || left.publicationDate);
 ---
-<BaseLayout title="主题分类"><div class="page"><header class="topic-page-head"><h1>主题分类</h1><p class="muted">按 4 个耳鼻喉专科分组的最新文献。</p></header><section class="topic-grid">{topics.map((topic) => { const items = articles.filter((article) => article.specialty === topic.label); return <a class="topic-card" href={`/topics/${topic.slug}/`} aria-label={`查看${topic.label}全部文献`}><h2>{topic.label}</h2><p class="topic-count">{items.length} 篇</p><div class="topic-previews">{items.slice(0, 5).map((item) => <div class="topic-preview"><span title={item.titleZh}>{item.titleZh}</span><time>{item.entryDate || item.publicationDate}</time></div>)}</div></a>; })}</section></div></BaseLayout>
+<BaseLayout title="主题分类"><div class="page"><header class="topic-page-head"><h1>主题分类</h1><p class="muted">按 4 个耳鼻喉专科分组的最新文献。</p></header><section class="topic-grid">{topics.map((topic) => { const items = articles.filter((article) => article.specialty === topic.label).sort(newestFirst); return <a class="topic-card" href={`/topics/${topic.slug}/`} aria-label={`查看${topic.label}全部文献`}><h2>{topic.label}</h2><p class="topic-count">{items.length} 篇</p><div class="topic-previews">{items.slice(0, 5).map((item) => <div class="topic-preview"><span title={item.titleZh}>{item.titleZh}</span><time>{item.entryDate || item.publicationDate}</time></div>)}</div></a>; })}</section></div></BaseLayout>
